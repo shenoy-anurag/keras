@@ -742,6 +742,28 @@ class OptimizerTest(tf.test.TestCase, parameterized.TestCase):
     self.evaluate(opt_op)
     self.assertEqual(self.evaluate(var), 1.0)
 
+  @combinations.generate(combinations.combine(mode=['eager']))
+  def test_create_slots_for_sharded_variables(self):
+    # set names so that ShardedVariable is well-named for slot variable keying.
+    var_a = tf.Variable([1.0], name='part_0')
+    var_b = tf.Variable([2.0], name='part_1')
+    sharded_var = tf.__internal__.distribute.sharded_variable.ShardedVariable(
+        [var_a, var_b])
+
+    opt = adagrad.Adagrad()
+    opt._create_slots(sharded_var.variables)
+    opt._create_slots_for_sharded_variables(sharded_var.variables)
+
+    sharded_slot = opt.get_slot(sharded_var, 'accumulator')
+    self.assertIsInstance(
+        sharded_slot,
+        tf.__internal__.distribute.sharded_variable.ShardedVariable)
+
+    slot_a = opt.get_slot(var_a, 'accumulator')
+    self.assertAllClose(sharded_slot.variables[0], slot_a)
+    slot_b = opt.get_slot(var_b, 'accumulator')
+    self.assertAllClose(sharded_slot.variables[1], slot_b)
+
 
 @keras_parameterized.run_all_keras_modes
 class OptimizersCompatibilityTest(keras_parameterized.TestCase):

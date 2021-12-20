@@ -157,6 +157,43 @@ class ShardedVariableTest(tf.test.TestCase):
       with self.strategy.scope():
         keras.models.load_model(saved_dir)
 
+  def test_slot_variable_checkpointing(self):
+
+    with self.strategy.scope():
+      # set a name so the ShardedVariable is well-named for slot variable keying
+      var = tf.Variable([1., 2.], name='test')
+
+    opt = keras.optimizer_v2.adam.Adam()
+
+    # Run once to trigger apply_gradients to populate optimizer slot variables.
+    def train_step():
+      with tf.GradientTape() as tape:
+        loss = sum(var)
+      opt.minimize(loss, var.variables, tape=tape)
+
+    self.strategy.run(train_step)
+
+    # check that we can call get_slot using each slot, before and after
+    # checkpointing, and get the same results
+    pre_ckpt_slots = []
+    for slot in opt.get_slot_names():
+      pre_ckpt_slots.append(opt.get_slot(var, slot))
+
+    ckpt = tf.train.Checkpoint(sharded=var)
+
+    saved_dir = self.get_temp_dir()
+    ckpt_prefix = f'{saved_dir}/ckpt'
+    ckpt.save(ckpt_prefix)
+
+    restore_ckpt = tf.train.Checkpoint(sharded=var)
+    restore_ckpt.restore(tf.train.latest_checkpoint(saved_dir))
+    post_ckpt_slots = []
+    for slot in opt.get_slot_names():
+      post_ckpt_slots.append(opt.get_slot(var, slot))
+
+    for pre, post in zip(pre_ckpt_slots, post_ckpt_slots):
+      self.assertAllClose(pre.variables, post.variables)
+
 
 if __name__ == '__main__':
   tf.compat.v1.enable_v2_behavior()
