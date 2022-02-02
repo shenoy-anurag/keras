@@ -23,6 +23,7 @@ from keras.engine import base_preprocessing_layer
 from keras.layers.preprocessing import preprocessing_utils as utils
 from keras.preprocessing.image import smart_resize
 from keras.utils import control_flow_util
+from keras.utils import tf_utils
 import numpy as np
 import tensorflow.compat.v2 as tf
 from tensorflow.python.util.tf_export import keras_export
@@ -104,15 +105,27 @@ class Resizing(base_layer.Layer):
     else:
       input_dtype = tf.float32
     inputs = utils.ensure_tensor(inputs, dtype=input_dtype)
+    size = [self.height, self.width]
     if self.crop_to_aspect_ratio:
-      outputs = smart_resize(
-          inputs,
-          size=[self.height, self.width],
-          interpolation=self._interpolation_method)
+      def resize_to_aspect(x):
+        if tf_utils.is_ragged(inputs):
+          x = x.to_tensor()
+        return smart_resize(
+            x,
+            size=size,
+            interpolation=self._interpolation_method)
+
+      if tf_utils.is_ragged(inputs):
+        size_as_shape = tf.TensorShape(size)
+        shape = size_as_shape + inputs.shape[-1:]
+        spec = tf.TensorSpec(shape, tf.float32)
+        outputs = tf.map_fn(resize_to_aspect, inputs, fn_output_signature=spec)
+      else:
+        outputs = resize_to_aspect(inputs)
     else:
       outputs = tf.image.resize(
           inputs,
-          size=[self.height, self.width],
+          size=size,
           method=self._interpolation_method)
     outputs = tf.cast(outputs, self.compute_dtype)
     return outputs
